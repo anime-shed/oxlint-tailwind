@@ -65,6 +65,29 @@ export class ConflictDetector {
     return conflicts;
   }
 
+  detectConflictsSync(input: string, filePath: string): ClassConflict[] {
+    this.logger.debug(`Detecting conflicts in: ${input.substring(0, 50)}...`)
+    const classes = this.validator.extractClasses(input)
+    this.logger.debug(`Found ${classes.length} potential Tailwind classes`)
+    if (classes.length < 2) {
+      return []
+    }
+    const conflicts: ClassConflict[] = []
+    for (let i = 0; i < classes.length; i++) {
+      for (let j = i + 1; j < classes.length; j++) {
+        const class1 = classes[i]
+        const class2 = classes[j]
+        if (this.areResponsiveVariants(class1, class2)) {
+          continue
+        }
+        const conflict = this.checkPatternConflict(class1, class2)
+        if (conflict) conflicts.push(conflict)
+      }
+    }
+    this.logger.debug(`Found ${conflicts.length} conflicts`)
+    return conflicts
+  }
+
   /**
    * Check if two classes conflict with each other
    */

@@ -72,8 +72,7 @@ const tailwindPlugin = definePlugin({
             }
 
             try {
-              const conflicts = conflictDetector.detectConflicts(node.value, filePath);
-              
+              const conflicts = conflictDetector.detectConflictsSync(node.value, filePath);
               if (conflicts.length > 0) {
                 conflicts.forEach(conflict => {
                   const message = `Tailwind CSS conflict detected: ${conflict.classes.join(' vs ')} - ${conflict.reason}`;
@@ -115,7 +114,7 @@ const tailwindPlugin = definePlugin({
             node.quasis.forEach((quasi, index) => {
               if (quasi.value.raw) {
                 try {
-                  const conflicts = conflictDetector.detectConflicts(quasi.value.raw, filePath);
+                  const conflicts = conflictDetector.detectConflictsSync(quasi.value.raw, filePath);
                   
                   if (conflicts.length > 0) {
                     conflicts.forEach(conflict => {
@@ -181,21 +180,21 @@ const tailwindPlugin = definePlugin({
 
             try {
               const suggestions = suggester.getCanonicalSuggestions(node.value, filePath);
-              
               suggestions.forEach(suggestion => {
                 const message = `Consider using canonical class '${suggestion.canonical}' instead of '${suggestion.original}' for better consistency`;
-                
+                const originalText = typeof (node as any).raw === 'string' ? (node as any).raw : (node as any).value;
                 context.report({
                   node,
                   message,
                   fix(fixer) {
-                    return fixer.replaceText(node, node.raw.replace(suggestion.original, suggestion.canonical));
+                    const replaced = String(originalText).replace(suggestion.original, suggestion.canonical);
+                    return fixer.replaceText(node, replaced);
                   }
                 });
               });
             } catch (error) {
-              logger.error('Error generating canonical suggestions:', error);
-              // Don't report errors for suggestion failures to avoid noise
+              const msg = error instanceof Error ? error.message : String(error);
+              logger.error(`Error generating canonical suggestions: ${msg}`);
             }
           },
 
@@ -211,21 +210,20 @@ const tailwindPlugin = definePlugin({
               if (quasi.value.raw) {
                 try {
                   const suggestions = suggester.getCanonicalSuggestions(quasi.value.raw, filePath);
-                  
                   suggestions.forEach(suggestion => {
                     const message = `Consider using canonical class '${suggestion.canonical}' instead of '${suggestion.original}' for better consistency`;
-                    
                     context.report({
                       node: quasi,
                       message,
                       fix(fixer) {
-                        const newText = quasi.value.raw.replace(suggestion.original, suggestion.canonical);
+                        const newText = String(quasi.value.raw).replace(suggestion.original, suggestion.canonical);
                         return fixer.replaceText(quasi, newText);
                       }
                     });
                   });
                 } catch (error) {
-                  logger.error('Error generating canonical suggestions for template:', error);
+                  const msg = error instanceof Error ? error.message : String(error);
+                  logger.error(`Error generating canonical suggestions for template: ${msg}`);
                 }
               }
             });
