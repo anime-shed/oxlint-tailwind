@@ -46,7 +46,7 @@ const tailwindPlugin = definePlugin({
      */
     'no-conflicting-classes': {
       createOnce(context) {
-        const options = { ...DEFAULT_OPTIONS, ...context.options?.[0] };
+        const options = { ...DEFAULT_OPTIONS };
         const logger = new Logger(options.logLevel || 'info');
         const validator = new TailwindValidator(logger);
         const conflictDetector = new ConflictDetector(validator, logger);
@@ -156,7 +156,7 @@ const tailwindPlugin = definePlugin({
      */
     'prefer-canonical-classes': {
       createOnce(context) {
-        const options = { ...DEFAULT_OPTIONS, ...context.options?.[0] };
+        const options = { ...DEFAULT_OPTIONS };
         const logger = new Logger(options.logLevel || 'info');
         const validator = new TailwindValidator(logger);
         const suggester = new CanonicalSuggester(validator, logger);
