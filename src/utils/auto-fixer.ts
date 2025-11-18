@@ -37,18 +37,25 @@ export class AutoFixer {
 
     try {
       const originalText = node.raw || node.value;
-      let fixedText = originalText;
+      let fixedText = String(originalText);
 
       // Apply the suggested fix
-      if (conflict.suggestedFix.includes('Choose one:')) {
+      if (!conflict.fixable) {
         // For "choose one" conflicts, we'll need to implement a more sophisticated fix
         // For now, just remove the conflicting classes
         const classesToRemove = conflict.classes;
-        fixedText = this.removeClasses(originalText, classesToRemove);
+        fixedText = this.applyRemoveInClassAttributes(fixedText, classesToRemove);
         this.logger.warn(`Removed conflicting classes: ${classesToRemove.join(', ')}`);
       } else {
         // Replace conflicting classes with the suggested fix
-        fixedText = this.replaceClasses(originalText, conflict.classes, conflict.suggestedFix);
+        const replacement = conflict.suggestedFix || '';
+        // Only apply replacement if it looks like a single class token
+        if (/^[^\s]+$/.test(replacement)) {
+          fixedText = this.applyReplaceInClassAttributes(fixedText, conflict.classes, replacement);
+        } else {
+          // Fallback to removal to avoid injecting messages into code
+          fixedText = this.applyRemoveInClassAttributes(fixedText, conflict.classes);
+        }
       }
 
       if (fixedText !== originalText) {
@@ -133,6 +140,36 @@ export class AutoFixer {
     const classes = classString.split(/\s+/);
     const filteredClasses = classes.filter(cls => !classesToRemove.includes(cls));
     return filteredClasses.join(' ');
+  }
+
+  private applyRemoveInClassAttributes(input: string, classesToRemove: string[]): string {
+    return this.transformClassAttributes(input, (classValue) => {
+      const tokens = classValue.split(/\s+/).filter(Boolean);
+      const filtered = tokens.filter(t => !classesToRemove.includes(t));
+      return filtered.join(' ');
+    });
+  }
+
+  private applyReplaceInClassAttributes(input: string, classesToReplace: string[], replacement: string): string {
+    return this.transformClassAttributes(input, (classValue) => {
+      const tokens = classValue.split(/\s+/).filter(Boolean);
+      const filtered = tokens.filter(t => !classesToReplace.includes(t));
+      if (!filtered.includes(replacement)) filtered.push(replacement);
+      return filtered.join(' ');
+    });
+  }
+
+  private transformClassAttributes(input: string, transform: (classValue: string) => string): string {
+    // Handle class="..." and className="..."
+    const patterns = [/class\s*=\s*(["'])([^"']+)(["'])/g, /className\s*=\s*(["'])([^"']+)(["'])/g];
+    let output = input;
+    for (const pattern of patterns) {
+      output = output.replace(pattern, (_m, quoteStart, classVal, quoteEnd) => {
+        const newVal = transform(classVal);
+        return `class=${quoteStart}${newVal}${quoteEnd}`;
+      });
+    }
+    return output;
   }
 
   /**

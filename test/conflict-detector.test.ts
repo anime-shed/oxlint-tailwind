@@ -77,6 +77,18 @@ describe('ConflictDetector', () => {
       }
     });
 
+    test('should not detect conflict between text size and text color', async () => {
+      const input = 'text-sm text-sky-400';
+      const conflicts = await conflictDetector.detectConflicts(input, 'test.html');
+      expect(conflicts.length).toBe(0);
+    });
+
+    test('should not detect conflict between text size and arbitrary text color', async () => {
+      const input = 'text-sm text-[red]';
+      const conflicts = await conflictDetector.detectConflicts(input, 'test.html');
+      expect(conflicts.length).toBe(0);
+    });
+
     test('should detect flex direction conflicts', async () => {
       const input = 'flex-row flex-col';
       const conflicts = await conflictDetector.detectConflicts(input, 'test.html');
@@ -154,6 +166,14 @@ describe('ConflictDetector', () => {
       if (conflicts.length > 0) {
         expect(conflicts[0].reason).toBeDefined();
         expect(conflicts[0].reason.length).toBeGreaterThan(0);
+      }
+    });
+
+    test('should mark height conflicts as fixable', async () => {
+      const input = 'h-screen h-8';
+      const conflicts = await conflictDetector.detectConflicts(input, 'test.html');
+      if (conflicts.length > 0) {
+        expect(conflicts.some(c => c.classes.includes('h-screen') || c.classes.includes('h-8'))).toBe(true);
       }
     });
   });

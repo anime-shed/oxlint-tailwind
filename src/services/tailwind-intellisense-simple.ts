@@ -124,15 +124,20 @@ export class TailwindIntellisenseSimpleService {
       if (className.includes('hidden')) cssProperties.push('display: none');
       if (className.includes('items-center')) cssProperties.push('align-items: center');
       if (className.includes('justify-between')) cssProperties.push('justify-content: space-between');
-      if (className.includes('mt-')) cssProperties.push('margin-top: var(--spacing)');
-      if (className.includes('mb-')) cssProperties.push('margin-bottom: var(--spacing)');
-      if (className.includes('ml-')) cssProperties.push('margin-left: var(--spacing)');
-      if (className.includes('mr-')) cssProperties.push('margin-right: var(--spacing)');
-      if (className.includes('p-')) cssProperties.push('padding: var(--spacing)');
-      if (className.includes('text-')) cssProperties.push('font-size: var(--font-size)');
-      if (className.includes('font-')) cssProperties.push('font-weight: var(--font-weight)');
-      if (className.includes('bg-')) cssProperties.push('background-color: var(--color)');
-      if (className.includes('text-') && !className.includes('text-center') && !className.includes('text-left') && !className.includes('text-right')) cssProperties.push('color: var(--color)');
+      if (/^mt-/.test(className)) cssProperties.push('margin-top: var(--spacing)');
+      if (/^mb-/.test(className)) cssProperties.push('margin-bottom: var(--spacing)');
+      if (/^ml-/.test(className)) cssProperties.push('margin-left: var(--spacing)');
+      if (/^mr-/.test(className)) cssProperties.push('margin-right: var(--spacing)');
+      if (/^p-/.test(className)) cssProperties.push('padding: var(--spacing)');
+      if (/^h-/.test(className)) cssProperties.push('height: var(--size)');
+      if (/^w-/.test(className)) cssProperties.push('width: var(--size)');
+      if (/^font-/.test(className)) cssProperties.push('font-weight: var(--font-weight)');
+      if (/^bg-/.test(className)) cssProperties.push('background-color: var(--color)');
+
+      const isTextSize = /^(text)-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)$/.test(className);
+      const isTextColor = /^(text)-(transparent|current|black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(50|100|200|300|400|500|600|700|800|900|950)$/.test(className) || /^text-\[[^\]]+\]$/.test(className);
+      if (isTextSize) cssProperties.push('font-size: var(--font-size)');
+      if (isTextColor) cssProperties.push('color: var(--color)');
     }
 
     return {

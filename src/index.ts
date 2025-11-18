@@ -9,12 +9,11 @@
  */
 
 import { definePlugin } from 'oxlint';
-import { TailwindValidator } from './validators/tailwind-validator.js';
-import { FileScanner } from './utils/file-scanner.js';
-import { ConflictDetector } from './validators/conflict-detector.js';
-import { CanonicalSuggester } from './validators/canonical-suggester.js';
 import { AutoFixer } from './utils/auto-fixer.js';
 import { Logger } from './utils/logger.js';
+import { CanonicalSuggester } from './validators/canonical-suggester.js';
+import { ConflictDetector } from './validators/conflict-detector.js';
+import { TailwindValidator } from './validators/tailwind-validator.js';
 
 export interface PluginOptions {
   enableAutoFix?: boolean;
@@ -45,6 +44,7 @@ const tailwindPlugin = definePlugin({
      * Auto-fixes resolvable conflicts when enabled
      */
     'no-conflicting-classes': {
+      meta: { fixable: 'code' },
       createOnce(context) {
         const options = { ...DEFAULT_OPTIONS };
         const logger = new Logger(options.logLevel || 'info');
@@ -71,8 +71,13 @@ const tailwindPlugin = definePlugin({
               return;
             }
 
+            // Only process strings that contain class/className attributes
+            const originalText = (node as any).raw ?? (node as any).value;
+            const containsClassAttr = /class\s*=\s*["']/.test(String(originalText)) || /className\s*=\s*["']/.test(String(originalText));
+            if (!containsClassAttr) return;
+
             try {
-              const conflicts = conflictDetector.detectConflictsSync(node.value, filePath);
+              const conflicts = conflictDetector.detectConflictsSync(String(originalText), filePath);
               if (conflicts.length > 0) {
                 conflicts.forEach(conflict => {
                   const message = `Tailwind CSS conflict detected: ${conflict.classes.join(' vs ')} - ${conflict.reason}`;
@@ -96,10 +101,11 @@ const tailwindPlugin = definePlugin({
                 });
               }
             } catch (error) {
-              logger.error('Error processing literal node:', error);
+              const msg = error instanceof Error ? error.message : String(error);
+              logger.error(`Error processing literal node: ${msg}`);
               context.report({
                 node,
-                message: `Tailwind CSS validation error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                message: `Tailwind CSS validation error: ${msg}`
               });
             }
           },
@@ -107,12 +113,14 @@ const tailwindPlugin = definePlugin({
           /**
            * Process TemplateLiteral nodes (template strings)
            */
-          TemplateLiteral(node) {
+          async TemplateLiteral(node) {
             const filePath = context.filename || context.getFilename?.() || 'unknown';
             
             // Only process quasis (static parts) of template literals
             node.quasis.forEach((quasi, index) => {
               if (quasi.value.raw) {
+                const containsClassAttr = /class\s*=\s*["']/.test(String(quasi.value.raw)) || /className\s*=\s*["']/.test(String(quasi.value.raw));
+                if (!containsClassAttr) return;
                 try {
                   const conflicts = conflictDetector.detectConflictsSync(quasi.value.raw, filePath);
                   
@@ -137,10 +145,11 @@ const tailwindPlugin = definePlugin({
                     });
                   }
                 } catch (error) {
-                  logger.error('Error processing template literal:', error);
+                  const msg = error instanceof Error ? error.message : String(error);
+                  logger.error(`Error processing template literal: ${msg}`);
                   context.report({
                     node: quasi,
-                    message: `Tailwind CSS validation error: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    message: `Tailwind CSS validation error: ${msg}`
                   });
                 }
               }
@@ -154,11 +163,13 @@ const tailwindPlugin = definePlugin({
      * Suggests canonical Tailwind CSS classes for better consistency
      */
     'prefer-canonical-classes': {
+      meta: { fixable: 'code' },
       createOnce(context) {
         const options = { ...DEFAULT_OPTIONS };
         const logger = new Logger(options.logLevel || 'info');
         const validator = new TailwindValidator(logger);
-        const suggester = new CanonicalSuggester(validator, logger);
+        const lsp = new (require('./services/tailwind-lsp-client.js').TailwindLspClient)(logger)
+        const suggester = new CanonicalSuggester(validator, logger, lsp);
 
         return {
           before() {
@@ -168,7 +179,7 @@ const tailwindPlugin = definePlugin({
           /**
            * Process Literal nodes for canonical class suggestions
            */
-          Literal(node) {
+          async Literal(node) {
             if (typeof node.value !== 'string' || !options.enableSuggestions) return;
 
             const filePath = context.filename || context.getFilename?.() || 'unknown';
@@ -179,15 +190,21 @@ const tailwindPlugin = definePlugin({
             }
 
             try {
-              const suggestions = suggester.getCanonicalSuggestions(node.value, filePath);
+              const originalText = (node as any).raw ?? (node as any).value;
+              const containsClassAttr = /class\s*=\s*["']/.test(String(originalText)) || /className\s*=\s*["']/.test(String(originalText));
+              if (!containsClassAttr) return;
+              const suggestions = suggester.getCanonicalSuggestionsSync(String(originalText), filePath);
               suggestions.forEach(suggestion => {
                 const message = `Consider using canonical class '${suggestion.canonical}' instead of '${suggestion.original}' for better consistency`;
-                const originalText = typeof (node as any).raw === 'string' ? (node as any).raw : (node as any).value;
                 context.report({
                   node,
                   message,
                   fix(fixer) {
-                    const replaced = String(originalText).replace(suggestion.original, suggestion.canonical);
+                    // Replace only inside class/className attributes
+                    const replaced = String(originalText).replace(/(class(Name)?\s*=\s*["'])([^"']+)(["'])/g, (_m, p1, _p2, classes, p4) => {
+                      const newClasses = classes.split(/\s+/).map(c => c === suggestion.original ? suggestion.canonical : c).join(' ');
+                      return `${p1}${newClasses}${p4}`;
+                    });
                     return fixer.replaceText(node, replaced);
                   }
                 });
@@ -206,27 +223,33 @@ const tailwindPlugin = definePlugin({
 
             const filePath = context.filename || context.getFilename?.() || 'unknown';
 
-            node.quasis.forEach((quasi, index) => {
+            for (const [index, quasi] of node.quasis.entries()) {
               if (quasi.value.raw) {
                 try {
-                  const suggestions = suggester.getCanonicalSuggestions(quasi.value.raw, filePath);
-                  suggestions.forEach(suggestion => {
+                  const raw = String(quasi.value.raw);
+                  const containsClassAttr = /class\s*=\s*["']/.test(raw) || /className\s*=\s*["']/.test(raw);
+                  if (!containsClassAttr) continue;
+                  const suggestions = suggester.getCanonicalSuggestionsSync(raw, filePath);
+                  for (const suggestion of suggestions) {
                     const message = `Consider using canonical class '${suggestion.canonical}' instead of '${suggestion.original}' for better consistency`;
                     context.report({
                       node: quasi,
                       message,
                       fix(fixer) {
-                        const newText = String(quasi.value.raw).replace(suggestion.original, suggestion.canonical);
+                        const newText = raw.replace(/(class(Name)?\s*=\s*["'])([^"']+)(["'])/g, (_m, p1, _p2, classes, p4) => {
+                          const next = classes.split(/\s+/).map(c => c === suggestion.original ? suggestion.canonical : c).join(' ');
+                          return `${p1}${next}${p4}`;
+                        });
                         return fixer.replaceText(quasi, newText);
                       }
                     });
-                  });
+                  }
                 } catch (error) {
                   const msg = error instanceof Error ? error.message : String(error);
                   logger.error(`Error generating canonical suggestions for template: ${msg}`);
                 }
               }
-            });
+            }
           }
         };
       }

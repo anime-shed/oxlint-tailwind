@@ -231,13 +231,15 @@ export class ConflictDetector {
    * Check for typography conflicts
    */
   private checkTypographyConflict(class1: string, class2: string): ClassConflict | null {
-    // Font size conflicts
-    if (class1.startsWith('text-') && class2.startsWith('text-')) {
+    const isSize = (cls: string) => /^(text)-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)$/.test(cls);
+    const isColor = (cls: string) => /^(text)-(transparent|current|black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(50|100|200|300|400|500|600|700|800|900|950)$/.test(cls) || /^text-\[[^\]]+\]$/.test(cls);
+
+    // Font size conflicts (size vs size only)
+    if (isSize(class1) && isSize(class2)) {
       return {
         classes: [class1, class2],
         reason: 'Conflicting font size values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -246,8 +248,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting font weight values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -256,8 +257,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting line height values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -266,8 +266,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting letter spacing values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -278,13 +277,14 @@ export class ConflictDetector {
    * Check for color conflicts
    */
   private checkColorConflict(class1: string, class2: string): ClassConflict | null {
-    // Text color conflicts
-    if (class1.startsWith('text-') && class2.startsWith('text-')) {
+    const isColor = (cls: string) => /^(text)-(transparent|current|black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(50|100|200|300|400|500|600|700|800|900|950)$/.test(cls) || /^text-\[[^\]]+\]$/.test(cls);
+
+    // Text color conflicts (color vs color only)
+    if (isColor(class1) && isColor(class2)) {
       return {
         classes: [class1, class2],
         reason: 'Conflicting text color values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -293,8 +293,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting background color values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -303,8 +302,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting border color values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -321,8 +319,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting display values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 
@@ -332,8 +329,7 @@ export class ConflictDetector {
       return {
         classes: [class1, class2],
         reason: 'Conflicting position values',
-        fixable: true,
-        suggestedFix: `Keep only one: ${class1} or ${class2}`
+        fixable: false
       };
     }
 

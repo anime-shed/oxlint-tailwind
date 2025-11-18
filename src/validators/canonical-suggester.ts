@@ -5,6 +5,7 @@
 
 import { Logger } from '../utils/logger.js';
 import { TailwindValidator } from './tailwind-validator.js';
+import { TailwindLspClient } from '../services/tailwind-lsp-client.js'
 
 export interface CanonicalSuggestion {
   original: string;
@@ -15,132 +16,78 @@ export interface CanonicalSuggestion {
 export class CanonicalSuggester {
   private validator: TailwindValidator;
   private logger: Logger;
-  private canonicalMappings: Map<string, string>;
+  private lsp?: TailwindLspClient
 
-  constructor(validator: TailwindValidator, logger: Logger) {
+  constructor(validator: TailwindValidator, logger: Logger, lsp?: TailwindLspClient) {
     this.validator = validator;
     this.logger = logger;
-    this.canonicalMappings = new Map();
-    this.initializeCanonicalMappings();
-  }
-
-  /**
-   * Initialize canonical class mappings
-   */
-  private initializeCanonicalMappings(): void {
-    this.logger.debug('Initializing canonical class mappings');
-
-    // Common non-canonical to canonical mappings
-    const mappings: Record<string, string> = {
-      // Typography
-      'text-regular': 'text-base',
-      'text-normal': 'text-base',
-      'font-regular': 'font-normal',
-      'font-standard': 'font-normal',
-      'weight-normal': 'font-normal',
-      'weight-bold': 'font-bold',
-      
-      // Spacing
-      'margin-0': 'm-0',
-      'margin-1': 'm-1',
-      'margin-2': 'm-2',
-      'padding-0': 'p-0',
-      'padding-1': 'p-1',
-      'padding-2': 'p-2',
-      
-      // Layout
-      'display-block': 'block',
-      'display-inline': 'inline',
-      'display-flex': 'flex',
-      'display-grid': 'grid',
-      'display-none': 'hidden',
-      
-      // Sizing
-      'width-full': 'w-full',
-      'width-auto': 'w-auto',
-      'height-full': 'h-full',
-      'height-auto': 'h-auto',
-      
-      // Colors (common mistakes)
-      'text-grey': 'text-gray-500',
-      'bg-grey': 'bg-gray-500',
-      'border-grey': 'border-gray-500',
-      
-      // Responsive
-      'mobile': 'sm',
-      'tablet': 'md',
-      'desktop': 'lg',
-      
-      // State
-      'hover-bg': 'hover:bg',
-      'focus-bg': 'focus:bg',
-      'active-bg': 'active:bg',
-      'hover-text': 'hover:text',
-      'focus-text': 'focus:text'
-    };
-
-    Object.entries(mappings).forEach(([nonCanonical, canonical]) => {
-      this.canonicalMappings.set(nonCanonical, canonical);
-    });
-
-    this.logger.debug(`Initialized ${this.canonicalMappings.size} canonical mappings`);
+    this.lsp = lsp
   }
 
   /**
    * Get canonical suggestions for classes in a string
    */
-  getCanonicalSuggestions(input: string, filePath: string): CanonicalSuggestion[] {
-    this.logger.debug(`Generating canonical suggestions for: ${input.substring(0, 50)}...`);
-    
-    // First extract classes, then process them
-    const classes = this.extractClassesFromInput(input);
-    const suggestions: CanonicalSuggestion[] = [];
-
+  async getCanonicalSuggestions(input: string, filePath: string): Promise<CanonicalSuggestion[]> {
+    const classes = this.extractClassesFromInput(input)
+    const suggestions: CanonicalSuggestion[] = []
+    if (this.lsp) {
+      const uri = `file://${filePath}`
+      try {
+        const languageId = filePath.endsWith('.vue') ? 'vue' : filePath.endsWith('.tsx') ? 'typescriptreact' : filePath.endsWith('.jsx') ? 'javascriptreact' : filePath.endsWith('.html') ? 'html' : 'plaintext'
+        const d = await this.lsp.getCanonicalDiagnostics(input, uri, languageId)
+        suggestions.push(...this.mapDiagnosticsToSuggestions(d))
+      } catch {}
+    }
     classes.forEach(className => {
-      const suggestion = this.getCanonicalSuggestion(className);
-      if (suggestion) {
-        suggestions.push(suggestion);
-      }
-    });
+      const s = this.getCanonicalSuggestion(className)
+      if (s) suggestions.push(s)
+    })
+    const patternSuggestions = this.getPatternBasedSuggestions(input)
+    suggestions.push(...patternSuggestions)
+    return suggestions
+  }
 
-    // Check for patterns that suggest non-canonical usage
-    const patternSuggestions = this.getPatternBasedSuggestions(input);
-    suggestions.push(...patternSuggestions);
-
-    this.logger.debug(`Generated ${suggestions.length} canonical suggestions`);
-    return suggestions;
+  getCanonicalSuggestionsSync(input: string, filePath: string): CanonicalSuggestion[] {
+    const classes = this.extractClassesFromInput(input)
+    const suggestions: CanonicalSuggestion[] = []
+    classes.forEach(className => {
+      const s = this.getCanonicalSuggestion(className)
+      if (s) suggestions.push(s)
+    })
+    const patternSuggestions = this.getPatternBasedSuggestions(input)
+    suggestions.push(...patternSuggestions)
+    return suggestions
   }
 
   /**
    * Extract classes from input string, including non-Tailwind classes for suggestion
    */
   private extractClassesFromInput(input: string): string[] {
-    // Match class attribute content or standalone class names
-    const classPattern = /\b([a-z]+(?:-[a-z0-9-\.]+)*)/g;
-    const matches = input.match(classPattern) || [];
-    
-    // Filter out obvious non-class strings but keep potential non-canonical classes
-    return matches.filter(className => {
-      // Keep anything that looks like a class, even if not a valid Tailwind class
-      return className.length > 1 && className.length < 50;
-    });
+    const classes: string[] = []
+    const attrRegex = /(class(?:Name)?\s*=\s*["'])([^"']+)(["'])/g
+    let m: RegExpExecArray | null
+    while ((m = attrRegex.exec(input)) !== null) {
+      const content = m[2]
+      content.split(/\s+/).filter(Boolean).forEach(tok => classes.push(tok))
+    }
+
+    // Fallback: standalone tokens (keep broader match including variants, brackets, and '!')
+    if (classes.length === 0) {
+      input.split(/\s+/).filter(Boolean).forEach(tok => {
+        const cleaned = tok.replace(/["'<>]/g, '')
+        if (/^[!]?((?:[a-z-]+:)*)?[a-z-]+(?:-(?:\[[^\]]+\]|[a-z0-9\.]+))!?$/.test(cleaned)) {
+          classes.push(cleaned)
+        }
+      })
+    }
+
+    return classes
   }
 
   /**
    * Get canonical suggestion for a single class
    */
   private getCanonicalSuggestion(className: string): CanonicalSuggestion | null {
-    // Check direct mappings
-    const canonical = this.canonicalMappings.get(className);
-    if (canonical) {
-      return {
-        original: className,
-        canonical,
-        reason: `Use canonical Tailwind class instead of non-standard '${className}'`
-      };
-    }
-
-    // Check for common patterns
     return this.getPatternBasedSuggestion(className);
   }
 
@@ -170,7 +117,6 @@ export class CanonicalSuggester {
 
     // Check for British spelling vs American spelling
     const britishToAmerican: Record<string, string> = {
-      'grey': 'gray',
       'centre': 'center',
       'colour': 'color'
     };
@@ -185,6 +131,118 @@ export class CanonicalSuggester {
           reason: `Use American spelling '${american}' instead of British spelling '${british}'`
         };
       }
+    }
+
+    // Important modifier canonicalization: leading '!' becomes trailing '!'
+    if (/^!([a-z0-9:-]+)$/.test(className)) {
+      const base = className.slice(1)
+      return { original: className, canonical: `${base}!`, reason: 'Use trailing ! for important modifier' }
+    }
+
+    const disp = className.match(/^((?:[a-z-]+:)*)display-(block|inline|flex|grid|none)$/)
+    if (disp) {
+      const pref = disp[1] || ''
+      const val = disp[2]
+      const map: Record<string,string> = { block: 'block', inline: 'inline', flex: 'flex', grid: 'grid', none: 'hidden' }
+      return { original: className, canonical: `${pref}${map[val]}`.replace(/:$/,''), reason: 'Use canonical display utility' }
+    }
+
+    const width = className.match(/^((?:[a-z-]+:)*)width-(full|auto)$/)
+    if (width) {
+      const pref = width[1] || ''
+      const val = width[2]
+      return { original: className, canonical: `${pref}w-${val}`.replace(/:$/,''), reason: 'Use w-* sizing utility' }
+    }
+    const height = className.match(/^((?:[a-z-]+:)*)height-(full|auto)$/)
+    if (height) {
+      const pref = height[1] || ''
+      const val = height[2]
+      return { original: className, canonical: `${pref}h-${val}`.replace(/:$/,''), reason: 'Use h-* sizing utility' }
+    }
+
+    const margin = className.match(/^((?:[a-z-]+:)*)margin-(\d+)$/)
+    if (margin) {
+      const pref = margin[1] || ''
+      const num = margin[2]
+      return { original: className, canonical: `${pref}m-${num}`.replace(/:$/,''), reason: 'Use m-* spacing utility' }
+    }
+    const padding = className.match(/^((?:[a-z-]+:)*)padding-(\d+)$/)
+    if (padding) {
+      const pref = padding[1] || ''
+      const num = padding[2]
+      return { original: className, canonical: `${pref}p-${num}`.replace(/:$/,''), reason: 'Use p-* spacing utility' }
+    }
+
+    const flexGrow = className.match(/^((?:[a-z-]+:)*)flex-grow$/)
+    if (flexGrow) {
+      const pref = flexGrow[1] || ''
+      return { original: className, canonical: `${pref}grow`.replace(/:$/,''), reason: 'Use grow instead of flex-grow' }
+    }
+
+    const breakWords = className.match(/^((?:[a-z-]+:)*)break-words$/)
+    if (breakWords) {
+      const pref = breakWords[1] || ''
+      return { original: className, canonical: `${pref}wrap-break-word`.replace(/:$/,''), reason: 'Use wrap-break-word instead of break-words' }
+    }
+
+    const britishGrey = className.match(/^((?:[a-z-]+:)*)((text|bg|border)-)grey$/)
+    if (britishGrey) {
+      const pref = britishGrey[1] || ''
+      const preUtil = britishGrey[2]
+      const canonical = `${pref}${preUtil}gray-500`.replace(/:$/,'')
+      return { original: className, canonical, reason: 'Use American spelling gray and provide a standard shade' }
+    }
+
+    const textRegular = className.match(/^((?:[a-z-]+:)*)text-(regular|normal)$/)
+    if (textRegular) {
+      const pref = textRegular[1] || ''
+      return { original: className, canonical: `${pref}text-base`.replace(/:$/,''), reason: 'Use text-base for regular text' }
+    }
+
+    const fontRegular = className.match(/^((?:[a-z-]+:)*)font-(regular|standard)$/)
+    if (fontRegular) {
+      const pref = fontRegular[1] || ''
+      return { original: className, canonical: `${pref}font-normal`.replace(/:$/,''), reason: 'Use font-normal for regular weight' }
+    }
+
+    // z-index numeric arbitrary -> canonical numeric (remove brackets)
+    const zArb = className.match(/^(?<prefix>(?:[a-z-]+:)*)z-\[(?<num>-?[0-9]+)\]$/)
+    if (zArb && (zArb.groups as any)?.num) {
+      const num = (zArb.groups as any).num
+      const pref = (zArb.groups as any).prefix || ''
+      return { original: className, canonical: `${pref}z-${num}`.replace(/:$/,''), reason: 'Use canonical numeric z-index without brackets' }
+    }
+
+    // Convert arbitrary px to scale tokens for spacing/inset e.g., mt-[2px] -> mt-0.5, -mt-[20px] -> -mt-5
+    const pxToScale = (px: number) => {
+      const value = px / 4
+      const allowed = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10]
+      let best = allowed[0], diff = Math.abs(value - best)
+      for (const v of allowed) { const d = Math.abs(value - v); if (d < diff) { diff = d; best = v } }
+      return best % 1 === 0 ? String(best) : String(best)
+    }
+
+    const pxSpacing = className.match(/^(?<prefix>(?:[a-z-]+:)*)?(?<neg>-)?(?<prop>m|p|mt|mr|mb|ml|mx|my|pt|pr|pb|pl|px|py|top|left|right|bottom|inset)-\[(?<px>-?[0-9]+)px\]$/)
+    if (pxSpacing && (pxSpacing.groups as any)?.px) {
+      const px = Number((pxSpacing.groups as any).px)
+      const neg = (pxSpacing.groups as any).neg ? '-' : ''
+      const prop = (pxSpacing.groups as any).prop
+      const pref = (pxSpacing.groups as any).prefix || ''
+      const scale = pxToScale(Math.abs(px))
+      const sign = (px < 0 || neg) ? '-' : ''
+      return { original: className, canonical: `${pref}${sign}${prop}-${scale}`.replace(/:$/,''), reason: 'Use scale token instead of arbitrary px value' }
+    }
+
+    // Pseudo variants with arbitrary px e.g., after:top-[2px] -> after:top-0.5
+    const pseudoPx = className.match(/^(?<prefix>(?:[a-z-]+:)*)?(?<pseudo>before|after):(?<prop>top|left|right|bottom|inset)-\[(?<px>-?[0-9]+)px\]$/)
+    if (pseudoPx && (pseudoPx.groups as any)?.px) {
+      const px = Number((pseudoPx.groups as any).px)
+      const pref = (pseudoPx.groups as any).prefix || ''
+      const pseudo = (pseudoPx.groups as any).pseudo
+      const prop = (pseudoPx.groups as any).prop
+      const scale = pxToScale(Math.abs(px))
+      const sign = px < 0 ? '-' : ''
+      return { original: className, canonical: `${pref}${pseudo}:${sign}${prop}-${scale}`.replace(/:$/,''), reason: 'Use scale token instead of arbitrary px value' }
     }
 
     return null;
@@ -229,6 +287,17 @@ export class CanonicalSuggester {
     });
 
     return suggestions;
+  }
+
+  private mapDiagnosticsToSuggestions(diags: any[]): CanonicalSuggestion[] {
+    const out: CanonicalSuggestion[] = []
+    for (const d of diags) {
+      if (d?.code === 'suggestCanonicalClasses' && typeof d?.message === 'string') {
+        const m = d.message.match(/`([^`]+)`.*`([^`]+)`/)
+        if (m) out.push({ original: m[1], canonical: m[2], reason: 'Tailwind IntelliSense canonical suggestion' })
+      }
+    }
+    return out
   }
 
   /**
@@ -291,20 +360,7 @@ export class CanonicalSuggester {
    * Check if a class is canonical
    */
   async isCanonical(className: string): Promise<boolean> {
-    // If it's in our mappings as a canonical value, it's canonical
-    const isCanonicalMapping = Array.from(this.canonicalMappings.values()).includes(className);
-    if (isCanonicalMapping) {
-      return true;
-    }
-
-    // If it's a valid Tailwind class and not in the non-canonical mappings, it's likely canonical
     const isValidTailwind = await this.validator.isTailwindClass(className);
-    if (isValidTailwind) {
-      // Check if it's in the non-canonical keys
-      const isNonCanonical = this.canonicalMappings.has(className);
-      return !isNonCanonical;
-    }
-
-    return false;
+    return !!isValidTailwind;
   }
 }
