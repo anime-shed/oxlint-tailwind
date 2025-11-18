@@ -1,0 +1,45 @@
+{
+  "name": "oxlint-plugin-tailwindcss",
+  "version": "1.0.0",
+  "description": "Oxlint plugin for Tailwind CSS validation and auto-fixing",
+  "module": "dist/index.js",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node",
+    "dev": "bun run src/index.ts",
+    "test": "bun test",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "keywords": [
+    "oxlint",
+    "tailwindcss",
+    "linter",
+    "plugin",
+    "css",
+    "validation"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/bun": "latest",
+    "@types/node": "^24.10.1",
+    "oxlint": "^1.29.0",
+    "tailwindcss": "^4.1.17"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@tailwindcss/language-server": "^0.14.29"
+  }
+}

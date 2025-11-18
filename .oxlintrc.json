@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "jsPlugins": [
+    "./dist/index.js"
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "globals": {
+    "tailwind": "readonly"
+  },
+  "rules": {
+    "eqeqeq": "warn",
+    "no-unused-vars": "warn",
+    "tailwindcss/no-conflicting-classes": "error",
+    "tailwindcss/prefer-canonical-classes": "warn"
+  },
+  "ignorePatterns": [
+    "dist/",
+    "node_modules/",
+    "*.config.js",
+    "*.config.ts"
+  ]
+}

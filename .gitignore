@@ -1,0 +1,11 @@
+# Oxlint Plugin for Tailwind CSS
+
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+.vscode/
+coverage/
+.nyc_output/
+test-files/
